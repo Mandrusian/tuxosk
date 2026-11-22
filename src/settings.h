@@ -1,11 +1,11 @@
-// User settings, stored as key=value lines in $XDG_CONFIG_HOME/tiles-osk/config.
+// User settings, stored as key=value lines in $XDG_CONFIG_HOME/tuxosk/config.
 #pragma once
 #include <fstream>
 #include <map>
 #include <string>
 
 struct Settings {
-    // word filters: name -> enabled. "slurs" ships with the keyboard; others are lists in ~/.config/tiles-osk/filters/<name>.txt
+    // word filters: name -> enabled. "slurs" ships with the keyboard; others are lists in ~/.config/tuxosk/filters/<name>.txt
     std::map<std::string, bool> filters{{"slurs", true}};
     bool autocorrect = true;
     bool autocap = true;

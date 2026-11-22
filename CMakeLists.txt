@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(tiles-osk CXX)
+project(tuxosk CXX)
 set(CMAKE_CXX_STANDARD 17)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -24,19 +24,19 @@ add_library(oskcore STATIC src/lexicon.cpp src/swipe.cpp src/layout.cpp src/engi
 target_include_directories(oskcore PUBLIC ${DEPS_INCLUDE_DIRS})
 target_compile_options(oskcore PRIVATE -O2)
 
-add_executable(tiles-osk src/main.cpp ${GEN_SRCS})
+add_executable(tuxosk src/main.cpp ${GEN_SRCS})
 set_source_files_properties(${GEN}/input-method-unstable-v2-protocol.c ${GEN}/virtual-keyboard-unstable-v1-protocol.c
   ${GEN}/wlr-layer-shell-unstable-v1-protocol.c ${GEN}/xdg-shell-protocol.c PROPERTIES LANGUAGE C)
-set_target_properties(tiles-osk PROPERTIES LINKER_LANGUAGE CXX)
-target_include_directories(tiles-osk PRIVATE ${GEN} ${DEPS_INCLUDE_DIRS})
-target_link_libraries(tiles-osk oskcore ${DEPS_LIBRARIES})
+set_target_properties(tuxosk PROPERTIES LINKER_LANGUAGE CXX)
+target_include_directories(tuxosk PRIVATE ${GEN} ${DEPS_INCLUDE_DIRS})
+target_link_libraries(tuxosk oskcore ${DEPS_LIBRARIES})
 enable_language(C)
 
 add_executable(osk-test tests/test_core.cpp)
 target_link_libraries(osk-test oskcore ${DEPS_LIBRARIES})
 
-install(TARGETS tiles-osk RUNTIME DESTINATION bin)
-install(FILES data/en.txt data/blocklist.txt DESTINATION share/tiles-osk)
+install(TARGETS tuxosk RUNTIME DESTINATION bin)
+install(FILES data/en.txt data/blocklist.txt DESTINATION share/tuxosk)
 install(PROGRAMS scripts/osk-select DESTINATION bin)
 install(FILES data/osk-select.desktop DESTINATION share/applications)
 

@@ -1,4 +1,4 @@
-# tiles-osk
+# TuxOSK
 
 A fast on-screen keyboard for Wayland phones (phosh / phoc, postmarketOS). Gboard-style: swipe typing, number row, suggestions, autocorrect. Replaces the stock phosh keyboard.
 
@@ -20,12 +20,12 @@ Needs cairo, glib/gio, wayland-client, xkbcommon, wayland-scanner, cmake, ninja.
     sudo cmake --install build        # or: --prefix ~/.local
 
 ## Use with phosh
-    osk-select tiles      # phosh starts tiles-osk
+    osk-select tux        # phosh starts TuxOSK
     osk-select stevia     # back to the stock keyboard
     osk-select status
 
 ## Settings
-Hold space, tap "Keyboard settings". Stored in `~/.config/tiles-osk/config`. Custom filters: one word per line in `~/.config/tiles-osk/filters/<name>.txt`. Extra languages: `<code>.txt` (word count lines) in `~/.local/share/tiles-osk/`.
+Hold space, tap "Keyboard settings". Stored in `~/.config/tuxosk/config`. Custom filters: one word per line in `~/.config/tuxosk/filters/<name>.txt`. Extra languages: `<code>.txt` (word count lines) in `~/.local/share/tuxosk/`.
 
 ## Licence
 MIT. See NOTICE for the word list attribution.

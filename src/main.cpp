@@ -1,4 +1,4 @@
-// tiles-osk: on-screen keyboard for Wayland phones (wlroots/sway, phosh/phoc).
+// tuxosk: on-screen keyboard for Wayland phones (wlroots/sway, phosh/phoc).
 // input-method-v2 for text, virtual-keyboard-v1 for keys, wlr-layer-shell for the surface.
 #include <glib-unix.h>
 #include <gio/gio.h>
@@ -35,7 +35,7 @@ bool gVerbose = false;
 #define LOG(...) do { if (gVerbose) { std::fprintf(stderr, "[osk] " __VA_ARGS__); std::fputc('\n', stderr); } } while (0)
 
 int shmFile(size_t size) {
-    int fd = memfd_create("tiles-osk", MFD_CLOEXEC);
+    int fd = memfd_create("tuxosk", MFD_CLOEXEC);
     if (fd < 0) return -1;
     if (ftruncate(fd, (off_t)size) < 0) { close(fd); return -1; }
     return fd;
@@ -120,7 +120,7 @@ struct App : Output {
     void showModal() {
         if (msurf) return;
         msurf = wl_compositor_create_surface(comp);
-        mls = zwlr_layer_shell_v1_get_layer_surface(shell, msurf, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "tiles-osk-dialog");
+        mls = zwlr_layer_shell_v1_get_layer_surface(shell, msurf, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "tuxosk-dialog");
         static const zwlr_layer_surface_v1_listener l = {
             [](void *, zwlr_layer_surface_v1 *s, uint32_t serial, uint32_t w, uint32_t h) {
                 App &a = *gApp;
@@ -255,7 +255,7 @@ struct App : Output {
         LOG("show");
         curLayer = wantOverlay() ? ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY : ZWLR_LAYER_SHELL_V1_LAYER_TOP;
         surf = wl_compositor_create_surface(comp);
-        ls = zwlr_layer_shell_v1_get_layer_surface(shell, surf, nullptr, curLayer, "tiles-osk");
+        ls = zwlr_layer_shell_v1_get_layer_surface(shell, surf, nullptr, curLayer, "tuxosk");
         static const zwlr_layer_surface_v1_listener l = {
             [](void *, zwlr_layer_surface_v1 *s, uint32_t serial, uint32_t w, uint32_t h) { gApp->configure(s, serial, (int)w, (int)h); },
             [](void *, zwlr_layer_surface_v1 *) { gApp->hide(); }};
@@ -594,15 +594,15 @@ int main(int argc, char **argv) {
         else if (!std::strcmp(argv[i], "--show")) app.forceShow = true;
         else if (!std::strcmp(argv[i], "--ctl")) app.ctlEnabled = true;
         else if (!std::strcmp(argv[i], "--dict") && i + 1 < argc) dictPath = argv[++i];
-        else { std::fprintf(stderr, "usage: tiles-osk [-v] [--show] [--dict file] [--ctl]\n"); return 2; }
+        else { std::fprintf(stderr, "usage: tuxosk [-v] [--show] [--dict file] [--ctl]\n"); return 2; }
     }
     if (dictPath.empty()) {
         std::vector<std::string> c;
         if (const char *e = std::getenv("OSK_DICT")) c.push_back(e);
-        if (const char *h = std::getenv("HOME")) c.push_back(std::string(h) + "/.local/share/tiles-osk/en.txt");
+        if (const char *h = std::getenv("HOME")) c.push_back(std::string(h) + "/.local/share/tuxosk/en.txt");
         c.push_back("data/en.txt");
-        c.push_back("/usr/local/share/tiles-osk/en.txt");
-        c.push_back("/usr/share/tiles-osk/en.txt");
+        c.push_back("/usr/local/share/tuxosk/en.txt");
+        c.push_back("/usr/share/tuxosk/en.txt");
         for (auto &p : c) if (access(p.c_str(), R_OK) == 0) { dictPath = p; break; }
     }
     if (!dictPath.empty()) {
@@ -613,7 +613,7 @@ int main(int argc, char **argv) {
     {
         const char *home = std::getenv("HOME");
         const char *xc = std::getenv("XDG_CONFIG_HOME");
-        std::string cdir = (xc ? std::string(xc) : std::string(home ? home : ".") + "/.config") + "/tiles-osk";
+        std::string cdir = (xc ? std::string(xc) : std::string(home ? home : ".") + "/.config") + "/tuxosk";
         g_mkdir_with_parents(cdir.c_str(), 0755);
         app.cfgPath_ = cdir + "/config";
         app.filtersDir_ = cdir + "/filters";
@@ -631,7 +631,7 @@ int main(int argc, char **argv) {
         const char *home = std::getenv("HOME");
         const char *xdg = std::getenv("XDG_DATA_HOME");
         std::string dir = xdg ? std::string(xdg) : std::string(home ? home : ".") + "/.local/share";
-        dir += "/tiles-osk";
+        dir += "/tuxosk";
         g_mkdir_with_parents(dir.c_str(), 0755);
         app.userDictPath = dir + "/user.txt";
         app.lex.loadUser(app.userDictPath);
@@ -729,9 +729,9 @@ int main(int argc, char **argv) {
     wl_seat_add_listener(app.seat, &sl, nullptr);
     wl_display_roundtrip(app.dpy);
 
-    // test control: $XDG_RUNTIME_DIR/tiles-osk.fifo  (tap <label> | swipe <word> | hold <label> | state)
+    // test control: $XDG_RUNTIME_DIR/tuxosk.fifo  (tap <label> | swipe <word> | hold <label> | state)
     if (const char *rt = app.ctlEnabled ? std::getenv("XDG_RUNTIME_DIR") : nullptr) {
-        static std::string path = std::string(rt) + "/tiles-osk.fifo";
+        static std::string path = std::string(rt) + "/tuxosk.fifo";
         mkfifo(path.c_str(), 0600);
         const int fd = open(path.c_str(), O_RDWR | O_NONBLOCK);
         if (fd >= 0) g_io_add_watch(g_io_channel_unix_new(fd), G_IO_IN, [](GIOChannel *ch, GIOCondition, gpointer) -> gboolean {

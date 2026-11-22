@@ -1,20 +1,20 @@
 #!/bin/sh
-# Pick the on-screen keyboard phosh starts: osk-select tiles | stevia | toggle | status
+# Pick the on-screen keyboard phosh starts: osk-select tux | stevia | toggle | status
 set -e
 D="$HOME/.config/systemd/user/mobi.phosh.OSK.service.d"
-BIN="${TILES_OSK_BIN:-$HOME/.local/bin/tiles-osk}"
-state() { [ -f "$D/tiles-osk.conf" ] && echo tiles || echo stevia; }
+BIN="${TUXOSK_BIN:-$HOME/.local/bin/tuxosk}"
+state() { [ -f "$D/tuxosk.conf" ] && echo tux || echo stevia; }
 case "${1:-toggle}" in
   status) state; exit 0 ;;
-  toggle) [ "$(state)" = tiles ] && set -- stevia || set -- tiles ;;
+  toggle) [ "$(state)" = tux ] && set -- stevia || set -- tux ;;
 esac
 case "$1" in
-  tiles)
-    [ -x "$BIN" ] || { echo "tiles-osk not found at $BIN" >&2; exit 1; }
+  tux)
+    [ -x "$BIN" ] || { echo "tuxosk not found at $BIN" >&2; exit 1; }
     mkdir -p "$D"
-    printf '[Service]\nExecStart=\nExecStart=%s\n' "$BIN" > "$D/tiles-osk.conf" ;;
-  stevia) rm -f "$D/tiles-osk.conf" ;;
-  *) echo "usage: osk-select tiles|stevia|toggle|status" >&2; exit 2 ;;
+    printf '[Service]\nExecStart=\nExecStart=%s\n' "$BIN" > "$D/tuxosk.conf" ;;
+  stevia) rm -f "$D/tuxosk.conf" ;;
+  *) echo "usage: osk-select tux|stevia|toggle|status" >&2; exit 2 ;;
 esac
 systemctl --user daemon-reload
 systemctl --user restart mobi.phosh.OSK.service
