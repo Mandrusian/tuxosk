@@ -1,0 +1,3 @@
+data/en.txt: word frequencies from hermitdave/FrequencyWords (en_50k, OpenSubtitles),
+licensed CC-BY-SA-4.0. https://github.com/hermitdave/FrequencyWords
+protocols/*.xml: Wayland protocol definitions, each under its original licence (see file headers).

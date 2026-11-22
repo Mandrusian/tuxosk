@@ -1,0 +1,9 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libcairo2-dev libglib2.0-dev libwayland-dev wayland-protocols libxkbcommon-dev
+      - run: cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build --output-on-failure

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Switch Keyboard
+Comment=Toggle between tiles-osk and Stevia
+Exec=osk-select toggle
+Icon=input-keyboard-symbolic
+Categories=Settings;
