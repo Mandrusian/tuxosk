@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.png" alt="TuxOSK: a swipe keyboard for Linux phones" width="100%"></p>
+
 # TuxOSK
 
 A fast on-screen keyboard for Wayland phones (phosh / phoc, postmarketOS). Gboard-style: swipe typing, number row, suggestions, autocorrect. Replaces the stock phosh keyboard.
