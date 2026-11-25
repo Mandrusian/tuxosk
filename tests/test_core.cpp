@@ -1,11 +1,18 @@
-// Core tests (no Wayland): swipe accuracy on synthetic noisy paths, typing/autocorrect flows.
+// Core tests (no Wayland): swipe accuracy on synthetic noisy paths, typing/autocorrect/UI flows.
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <map>
 #include <random>
 
 #include "../src/engine.h"
 #include "../src/layout.h"
+#include "../src/settings.h"
+#include "../src/ui.h"
 
 struct Mock : Output {
     std::string text;           // committed text
@@ -105,12 +112,13 @@ int main(int argc, char **argv) {
     }
     {
         Mock m; Engine e(lex, dec, m); e.activated();
-        auto path = synth(L, "hello", *new std::mt19937(5), 0.05f);
+        std::mt19937 rng5(5), rng6(6), rng7(7);
+        auto path = synth(L, "hello", rng5, 0.05f);
         { auto r = dec.decode(path, 4); for (auto &x : r) std::printf("  cand %s %.3f\n", x.first.c_str(), x.second); }
         e.swipe(path);
         std::printf("swipe1 [%s]\n", m.view().c_str());
         CHECK(m.view() == "Hello ");                      // auto-cap, auto space
-        e.swipe(synth(L, "world", *new std::mt19937(6), 0.05f));
+        e.swipe(synth(L, "world", rng6, 0.05f));
         CHECK(m.view() == "Hello world ");
         e.typeChar(".");
         std::printf("after dot [%s]\n", m.view().c_str());
@@ -121,7 +129,7 @@ int main(int argc, char **argv) {
         e.space(); e.space();
         CHECK(m.view() == "Hello world. Ok. ");
         Mock m2; Engine e2(lex, dec, m2); e2.activated();
-        e2.swipe(synth(L, "good", *new std::mt19937(7), 0.05f));
+        e2.swipe(synth(L, "good", rng7, 0.05f));
         e2.backspace();
         CHECK(m2.view().empty());                         // backspace after a swipe removes the whole word
     }
@@ -129,6 +137,172 @@ int main(int argc, char **argv) {
         Mock m; m.im = false; Engine e(lex, dec, m); e.activated();
         e.typeChar("l"); e.typeChar("s"); e.enter();
         CHECK(m.keys.size() == 3);                        // no input method: plain key events
+    }
+
+    // contraction suggestions & literal selection (note: auto-cap at field start capitalises first letter)
+    {
+        Mock m; Engine e(lex, dec, m); e.activated();
+        for (char c : std::string("dont")) e.typeChar(std::string(1, c));
+        CHECK(e.suggestions().size() >= 2);
+        CHECK(e.suggestions()[0] == "Dont");
+        CHECK(e.suggestions()[1] == "Don't");
+        CHECK(e.mainSuggestion() == 1);
+        e.pickSuggestion(0);                              // pick literal "Dont"
+        CHECK(m.view() == "Dont ");
+    }
+
+    // shift states, noPredict, charToKey, layout helpers
+    {
+        Mock m; Engine e(lex, dec, m); e.activated();
+        CHECK(e.shift() == Engine::Once);                 // auto-cap at start of field
+        e.tapShift();
+        CHECK(e.shift() == Engine::Off);
+        e.doubleTapShift();
+        CHECK(e.shift() == Engine::Lock);
+        e.typeChar("a"); e.typeChar("b");
+        e.space();
+        CHECK(m.view() == "AB ");
+        e.setNoPredict(true);
+        CHECK(e.suggestions().empty());
+        e.typeChar("c");
+        CHECK(m.view() == "AB C");
+
+        uint32_t code = 0, mods = 0;
+        CHECK(Engine::charToKey("a", code, mods) && code == 30 && mods == 0);
+        CHECK(Engine::charToKey("A", code, mods) && code == 30 && mods == 1);
+        CHECK(Engine::charToKey("?", code, mods) && code == 53 && mods == 1);
+        CHECK(!Engine::charToKey("€", code, mods));
+        CHECK(Layout::neighbour('q', 'w'));
+        CHECK(!Layout::neighbour('q', 'm'));
+    }
+
+    // blocklist (case-insensitive + contractions) & user dictionary persistence
+    {
+        namespace fs = std::filesystem;
+        const fs::path tmpDir = fs::temp_directory_path() / "tuxosk_test_tmp";
+        fs::create_directories(tmpDir);
+        const fs::path blk = tmpDir / "block.txt";
+        const fs::path usr = tmpDir / "user.txt";
+        {
+            std::ofstream out(blk);
+            out << "HELLO\n" << "don't\n";
+        }
+        Lexicon filtered;
+        filtered.loadBlocklist(blk.string());
+        CHECK(filtered.load(dict));
+        CHECK(!filtered.known("hello"));
+        CHECK(!filtered.known("don't"));
+        CHECK(!filtered.known("dont"));
+
+        filtered.addUser("Zaphod");
+        filtered.addUser("qwertyuiopx");
+        filtered.saveUser(usr.string());
+
+        Lexicon reloaded;
+        CHECK(reloaded.load(dict));
+        CHECK(reloaded.loadUser(usr.string()));
+        CHECK(reloaded.known("qwertyuiopx"));
+
+        // settings load/save roundtrip
+        const fs::path cfgPath = tmpDir / "config";
+        Settings s1;
+        s1.lang = "de";
+        s1.autocorrect = false;
+        s1.light = true;
+        s1.tall = true;
+        s1.reduceMotion = true;
+        s1.filters["mywords"] = false;
+        s1.save(cfgPath.string());
+
+        Settings s2;
+        s2.load(cfgPath.string());
+        CHECK(s2.lang == "de");
+        CHECK(!s2.autocorrect);
+        CHECK(s2.light);
+        CHECK(s2.tall);
+        CHECK(s2.reduceMotion);
+        CHECK(s2.filters.count("slurs") && s2.filters["slurs"]);
+        CHECK(s2.filters.count("mywords") && !s2.filters["mywords"]);
+
+        fs::remove_all(tmpDir);
+    }
+
+    // Ui interaction, timers lifecycle, modal touch handling, capture mode, touchCancelAll
+    {
+        struct MockTimers : Timers {
+            int nextId = 1;
+            std::map<int, std::function<bool()>> active;
+            int add(int, std::function<bool()> cb) override {
+                int id = nextId++;
+                active[id] = std::move(cb);
+                return id;
+            }
+            void remove(int id) override { active.erase(id); }
+            void fireAll() {
+                std::vector<int> ids;
+                for (auto &kv : active) ids.push_back(kv.first);
+                for (int id : ids) {
+                    auto it = active.find(id);
+                    if (it == active.end()) continue;
+                    auto cb = it->second;
+                    if (!cb()) active.erase(id);
+                }
+            }
+        } timers;
+
+        Mock m;
+        {
+            Engine e(lex, dec, m);
+            Settings st;
+            Ui ui(e, lex, dec, timers);
+            ui.setSettings(&st);
+            ui.setLanguages({{"en", "English (US)", "QWERTY"}});
+            ui.setFilters({{"slurs", "Slurs"}});
+            ui.resize(540, 1);
+            e.activated();
+
+            // tap a key via keyPos
+            float x = 0, y = 0;
+            CHECK(ui.keyPos("H", x, y));
+            ui.touchDown(1, x, y);
+            ui.touchUp(1);
+            CHECK(m.view() == "H");
+
+            // open modal while a touch is down (space long-press simulation) and verify cleanup
+            CHECK(ui.keyPos("space", x, y));
+            ui.touchDown(2, x, y);
+            CHECK(!timers.active.empty());
+            timers.fireAll(); // triggers space long-press -> openModal(Modal::Langs)
+            CHECK(ui.modalOpen());
+            ui.closeModalNow();
+            CHECK(!ui.modalOpen());
+
+            // capture mode: tapping hidden strip suggestion should not commit, Enter saves blocked word
+            std::string blocked;
+            ui.onBlockWord = [&](const std::string &w) { blocked = w; };
+            ui.openFilters();
+            // tap "Block a word…" row near bottom of Filters dialog
+            ui.modalTouchDown(270, Layout::heightFor(540) / 2 + 40);
+            ui.modalTouchUp();
+            CHECK(!ui.modalOpen());
+            // tap strip slot 0 (should be ignored in capture mode)
+            ui.touchDown(3, 80, 20);
+            ui.touchUp(3);
+            CHECK(m.view() == "H");
+            // type "bad" and press enter
+            CHECK(ui.keyPos("b", x, y)); ui.touchDown(4, x, y); ui.touchUp(4);
+            CHECK(ui.keyPos("a", x, y)); ui.touchDown(5, x, y); ui.touchUp(5);
+            CHECK(ui.keyPos("d", x, y)); ui.touchDown(6, x, y); ui.touchUp(6);
+            CHECK(ui.keyPos("enter", x, y)); ui.touchDown(7, x, y); ui.touchUp(7);
+            CHECK(blocked == "bad");
+
+            // touchCancelAll with high touch ID (>9) clears timers cleanly
+            CHECK(ui.keyPos("e", x, y));
+            ui.touchDown(42, x, y);
+            ui.touchCancelAll();
+        }
+        // ~Ui() must clean up all remaining timers (including animation fade timers)
+        CHECK(timers.active.empty());
     }
     std::printf(fails ? "FAILED\n" : "ok\n");
     return fails ? 1 : 0;

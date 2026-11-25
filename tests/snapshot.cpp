@@ -14,6 +14,7 @@ struct Null : Output {
 struct NoTimers : Timers { int add(int, std::function<bool()>) override { return 0; } void remove(int) override {} };
 
 int main(int argc, char **argv) {
+    if (argc < 3) { std::fprintf(stderr, "usage: %s <dict> <out-prefix>\n", argv[0]); return 2; }
     Lexicon lex; if (!lex.load(argv[1])) return 2;
     SwipeDecoder dec; dec.setLexicon(&lex);
     Null out; Engine eng(lex, dec, out); NoTimers tm;

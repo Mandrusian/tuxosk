@@ -12,12 +12,6 @@ namespace {
 
 bool isAlnum(char c) { return std::isalnum((unsigned char)c) || (unsigned char)c >= 0x80; }
 
-int utf8Len(const std::string &s) {   // number of code points
-    int n = 0;
-    for (unsigned char c : s) if ((c & 0xC0) != 0x80) ++n;
-    return n;
-}
-
 std::string stripApos(const std::string &s) {
     std::string r;
     for (char c : s) if (c != '\'') r += c;
@@ -154,6 +148,7 @@ void Engine::typeChar(const std::string &s) {
         return;
     }
     const std::string text = finishWord(true);
+    if (lastAuto_.active) lastAuto_.suffixBytes = (int)s.size();
     if (wasAuto && text.empty() && s.size() == 1 && std::strchr(".,!?;:)", s[0]) && !before_.empty() && before_.back() == ' ')
         deleteChars(1);                 // the space we added after a swipe/suggestion goes away before punctuation
     out_.commit(text + s);
@@ -203,8 +198,9 @@ void Engine::backspace() {
     if (lastAuto_.active) {
         // undo the autocorrect: the typed word comes back as composing text
         const std::string typed = lastAuto_.typed, fixed = lastAuto_.fixed;
+        const int suffix = lastAuto_.suffixBytes;
         lastAuto_.active = false;
-        deleteChars((int)fixed.size() + 1);
+        deleteChars((int)fixed.size() + suffix);
         word_ = typed;
         out_.preedit(word_);
         out_.flush();
@@ -312,6 +308,8 @@ void Engine::pickSuggestion(int i) {
         push(text + " ");
         lastSwipeWord_ = text;
         lastSwipeBytes_ = (int)text.size() + 1;
+        main_ = i;
+        changed();
         return;
     }
     if (!word_.empty()) {
@@ -386,6 +384,10 @@ void Engine::refreshSuggestions() {
         if (!fix.empty()) { sugg_.push_back(applyCase(word_, fix)); main_ = 1; }
     } else {
         sugg_.push_back(word_);
+        if (!lex_.isOut(lw)) {
+            const std::string fix = lex_.restore(key);
+            if (!fix.empty()) { literal_ = 0; sugg_.push_back(applyCase(word_, fix)); main_ = 1; }
+        }
     }
     for (auto &c : comp) {
         if (sugg_.size() >= 3) break;

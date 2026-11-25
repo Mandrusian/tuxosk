@@ -19,7 +19,11 @@ A fast on-screen keyboard for Wayland phones (phosh / phoc, postmarketOS). Gboar
 Needs cairo, glib/gio, wayland-client, xkbcommon, wayland-scanner, cmake, ninja.
 
     cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build
-    sudo cmake --install build        # or: --prefix ~/.local
+    sudo cmake --install build        # or: cmake --install build --prefix ~/.local
+
+To build and run only the portable core library and unit/snapshot tests on systems without Wayland (e.g. macOS):
+
+    cmake -S . -B build -G Ninja -DBUILD_WAYLAND=OFF && cmake --build build && ctest --test-dir build --output-on-failure
 
 ## Use with phosh
     osk-select tux        # phosh starts TuxOSK

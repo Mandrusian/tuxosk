@@ -9,19 +9,19 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <set>
-#include <algorithm>
 #include <fstream>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <map>
 #include <csignal>
 #include <glib/gstdio.h>
-#include <algorithm>
 
 #include "engine.h"
 #include "input-method-unstable-v2-client-protocol.h"
@@ -158,6 +158,7 @@ struct App : Output {
         int fd = shmFile(mb->size);
         if (fd < 0) { delete mb; return; }
         mb->map = mmap(nullptr, mb->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (mb->map == MAP_FAILED) { close(fd); delete mb; return; }
         mb->pool = wl_shm_create_pool(shm, fd, (int)mb->size);
         close(fd);
         mb->buf = wl_shm_pool_create_buffer(mb->pool, 0, pw, ph, stride, WL_SHM_FORMAT_ARGB8888);
@@ -179,7 +180,7 @@ struct App : Output {
     uint32_t pendPurpose = 0, pendHint = 0, purpose = 0, hint = 0;
     std::string pendText; uint32_t pendCursor = 0; bool pendSurr = false;
     bool userHidden = false, dbusVisible = false, forceShow = false;
-    std::string userDictPath, dictPath_, dictDir_, cfgPath_, filtersDir_;
+    std::string userDictPath, userDataDir_, dictPath_, dictDir_, cfgPath_, filtersDir_;
     Settings cfg;
     bool ctlEnabled = false;
 
@@ -239,6 +240,7 @@ struct App : Output {
         int fd = shmFile(mappedSize);
         if (fd < 0) { std::fprintf(stderr, "shm failed\n"); return; }
         mapped = (unsigned char *)mmap(nullptr, mappedSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (mapped == MAP_FAILED) { mapped = nullptr; mappedSize = 0; close(fd); std::fprintf(stderr, "mmap failed\n"); return; }
         pool = wl_shm_create_pool(shm, fd, (int)mappedSize);
         close(fd);
         static const wl_buffer_listener bl = {[](void *d, wl_buffer *) { ((Buf *)d)->busy = false; if (gApp) gApp->render(); }};
@@ -382,24 +384,25 @@ struct App : Output {
         auto it = m.find(c);
         return it == m.end() ? c : it->second;
     }
-    void scanLists() {
-        std::vector<Ui::Lang> langs;
-        std::vector<Ui::Filter> filters;
-        if (GDir *d = g_dir_open(dictDir_.c_str(), 0, nullptr)) {
-            while (const char *n = g_dir_read_name(d)) {
-                const std::string f = n;
-                if (f.size() >= 5 && f.size() <= 7 && f.compare(f.size() - 4, 4, ".txt") == 0) {
-                    const std::string c = f.substr(0, f.size() - 4);
-                    bool ok = true;
-                    for (char ch : c) if (ch < 'a' || ch > 'z') ok = false;
-                    if (ok && c != "user") langs.push_back({c, langLabel(c), "QWERTY"});
-                }
-            }
-            g_dir_close(d);
+    std::string findBlocklist() const {
+        for (const std::string &p : {dictDir_ + "/blocklist.txt", userDataDir_ + "/blocklist.txt",
+                                     std::string("/usr/local/share/tuxosk/blocklist.txt"),
+                                     std::string("/usr/share/tuxosk/blocklist.txt"), std::string("data/blocklist.txt")}) {
+            if (!p.empty() && access(p.c_str(), R_OK) == 0) return p;
         }
-        std::sort(langs.begin(), langs.end(), [](const Ui::Lang &a, const Ui::Lang &b) { return a.code < b.code; });
-        if (langs.empty()) langs.push_back({"en", "English (US)", "QWERTY"});
-        if (access((dictDir_ + "/blocklist.txt").c_str(), R_OK) == 0) filters.push_back({"slurs", "Slurs"});
+        return {};
+    }
+    std::string findDict(const std::string &lang) const {
+        for (const std::string &dir : {userDataDir_, dictDir_}) {
+            if (dir.empty()) continue;
+            const std::string p = dir + "/" + lang + ".txt";
+            if (access(p.c_str(), R_OK) == 0) return p;
+        }
+        return {};
+    }
+    std::vector<Ui::Filter> discoverFilters() {
+        std::vector<Ui::Filter> filters;
+        if (!findBlocklist().empty()) filters.push_back({"slurs", "Slurs"});
         if (GDir *d = g_dir_open(filtersDir_.c_str(), 0, nullptr)) {
             while (const char *n = g_dir_read_name(d)) {
                 const std::string f = n;
@@ -412,16 +415,46 @@ struct App : Output {
             }
             g_dir_close(d);
         }
+        std::sort(filters.begin(), filters.end(), [](const Ui::Filter &a, const Ui::Filter &b) {
+            if (a.id == "slurs") return true;
+            if (b.id == "slurs") return false;
+            return a.id < b.id;
+        });
+        return filters;
+    }
+    void scanLists() {
+        std::vector<Ui::Lang> langs;
+        std::set<std::string> seenLangs;
+        for (const std::string &dir : {userDataDir_, dictDir_}) {
+            if (dir.empty()) continue;
+            if (GDir *d = g_dir_open(dir.c_str(), 0, nullptr)) {
+                while (const char *n = g_dir_read_name(d)) {
+                    const std::string f = n;
+                    if (f.size() >= 5 && f.size() <= 7 && f.compare(f.size() - 4, 4, ".txt") == 0) {
+                        const std::string c = f.substr(0, f.size() - 4);
+                        bool ok = true;
+                        for (char ch : c) if (ch < 'a' || ch > 'z') ok = false;
+                        if (ok && c != "user" && seenLangs.insert(c).second) langs.push_back({c, langLabel(c), "QWERTY"});
+                    }
+                }
+                g_dir_close(d);
+            }
+        }
+        std::sort(langs.begin(), langs.end(), [](const Ui::Lang &a, const Ui::Lang &b) { return a.code < b.code; });
+        if (langs.empty()) langs.push_back({"en", "English (US)", "QWERTY"});
         ui->setLanguages(langs);
-        ui->setFilters(filters);
+        ui->setFilters(discoverFilters());
     }
     void reloadDict() {
         saveDict();
         lex = Lexicon();
-        for (auto &[n, on] : cfg.filters)
-            if (on) lex.loadBlocklist(n == "slurs" ? dictDir_ + "/blocklist.txt" : filtersDir_ + "/" + n + ".txt");
-        std::string path = dictDir_ + "/" + cfg.lang + ".txt";
-        if (access(path.c_str(), R_OK) != 0) path = dictPath_;
+        for (auto &[n, on] : cfg.filters) {
+            if (!on) continue;
+            const std::string p = n == "slurs" ? findBlocklist() : filtersDir_ + "/" + n + ".txt";
+            if (!p.empty()) lex.loadBlocklist(p);
+        }
+        std::string path = findDict(cfg.lang);
+        if (path.empty()) path = dictPath_;
         lex.load(path);
         lex.loadUser(userDictPath);
         dec.setLexicon(&lex);
@@ -613,29 +646,29 @@ int main(int argc, char **argv) {
     {
         const char *home = std::getenv("HOME");
         const char *xc = std::getenv("XDG_CONFIG_HOME");
-        std::string cdir = (xc ? std::string(xc) : std::string(home ? home : ".") + "/.config") + "/tuxosk";
+        std::string cdir = ((xc && *xc) ? std::string(xc) : std::string(home ? home : ".") + "/.config") + "/tuxosk";
         g_mkdir_with_parents(cdir.c_str(), 0755);
         app.cfgPath_ = cdir + "/config";
         app.filtersDir_ = cdir + "/filters";
         app.cfg.load(app.cfgPath_);
+        const char *xdg = std::getenv("XDG_DATA_HOME");
+        app.userDataDir_ = ((xdg && *xdg) ? std::string(xdg) : std::string(home ? home : ".") + "/.local/share") + "/tuxosk";
+        g_mkdir_with_parents(app.userDataDir_.c_str(), 0755);
+        app.userDictPath = app.userDataDir_ + "/user.txt";
+        app.discoverFilters();
         if (access(app.cfgPath_.c_str(), R_OK) != 0) app.cfg.save(app.cfgPath_);
     }
-    for (auto &[n, on] : app.cfg.filters)
-        if (on) app.lex.loadBlocklist(n == "slurs" ? app.dictDir_ + "/blocklist.txt" : app.filtersDir_ + "/" + n + ".txt");
+    for (auto &[n, on] : app.cfg.filters) {
+        if (!on) continue;
+        const std::string p = n == "slurs" ? app.findBlocklist() : app.filtersDir_ + "/" + n + ".txt";
+        if (!p.empty()) app.lex.loadBlocklist(p);
+    }
     {
-        std::string lp = app.dictDir_ + "/" + app.cfg.lang + ".txt";
-        if (access(lp.c_str(), R_OK) == 0) dictPath = lp;
+        std::string lp = app.findDict(app.cfg.lang);
+        if (!lp.empty()) dictPath = lp;
     }
     if (dictPath.empty() || !app.lex.load(dictPath)) { std::fprintf(stderr, "dictionary not found\n"); return 1; }
-    {
-        const char *home = std::getenv("HOME");
-        const char *xdg = std::getenv("XDG_DATA_HOME");
-        std::string dir = xdg ? std::string(xdg) : std::string(home ? home : ".") + "/.local/share";
-        dir += "/tuxosk";
-        g_mkdir_with_parents(dir.c_str(), 0755);
-        app.userDictPath = dir + "/user.txt";
-        app.lex.loadUser(app.userDictPath);
-    }
+    app.lex.loadUser(app.userDictPath);
     app.dec.setLexicon(&app.lex);
 
     app.dpy = wl_display_connect(nullptr);
@@ -688,7 +721,7 @@ int main(int argc, char **argv) {
                 gApp->ui->touchMotion(id, (float)wl_fixed_to_double(x), (float)wl_fixed_to_double(y)); gApp->render();
             };
             tl.frame = [](void *, wl_touch *) {};
-            tl.cancel = [](void *, wl_touch *) { modalIds().clear(); for (int i = 0; i < 10; ++i) gApp->ui->touchCancel(i); gApp->render(); };
+            tl.cancel = [](void *, wl_touch *) { modalIds().clear(); gApp->ui->touchCancelAll(); gApp->render(); };
             tl.shape = [](void *, wl_touch *, int32_t, wl_fixed_t, wl_fixed_t) {};
             tl.orientation = [](void *, wl_touch *, int32_t, wl_fixed_t) {};
             wl_touch_add_listener(a.touch, &tl, nullptr);

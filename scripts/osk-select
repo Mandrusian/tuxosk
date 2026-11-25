@@ -2,7 +2,13 @@
 # Pick the on-screen keyboard phosh starts: osk-select tux | stevia | toggle | status
 set -e
 D="$HOME/.config/systemd/user/mobi.phosh.OSK.service.d"
-BIN="${TUXOSK_BIN:-$HOME/.local/bin/tuxosk}"
+if [ -n "${TUXOSK_BIN:-}" ]; then
+  BIN="$TUXOSK_BIN"
+elif [ -x "$HOME/.local/bin/tuxosk" ]; then
+  BIN="$HOME/.local/bin/tuxosk"
+else
+  BIN="$(command -v tuxosk 2>/dev/null || true)"
+fi
 state() { [ -f "$D/tuxosk.conf" ] && echo tux || echo stevia; }
 case "${1:-toggle}" in
   status) state; exit 0 ;;
@@ -10,7 +16,7 @@ case "${1:-toggle}" in
 esac
 case "$1" in
   tux)
-    [ -x "$BIN" ] || { echo "tuxosk not found at $BIN" >&2; exit 1; }
+    [ -n "$BIN" ] && [ -x "$BIN" ] || { echo "tuxosk not found (checked ~/.local/bin/tuxosk and PATH); set TUXOSK_BIN" >&2; exit 1; }
     mkdir -p "$D"
     printf '[Service]\nExecStart=\nExecStart=%s\n' "$BIN" > "$D/tuxosk.conf" ;;
   stevia) rm -f "$D/tuxosk.conf" ;;

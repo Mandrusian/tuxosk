@@ -1,6 +1,7 @@
 #include "ui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 
@@ -92,7 +93,12 @@ Ui::Ui(Engine &e, Lexicon &lex, SwipeDecoder &dec, Timers &t) : eng_(e), lex_(le
     eng_.onChange = [this] { onEngineChange(); };
 }
 
-Ui::~Ui() { if (base_) cairo_surface_destroy(base_); }
+Ui::~Ui() {
+    if (animId_) { timers_.remove(animId_); animId_ = 0; }
+    for (auto &[id, t] : touches_) { timers_.remove(t.lpTimer); timers_.remove(t.repTimer); }
+    touches_.clear();
+    if (base_) cairo_surface_destroy(base_);
+}
 
 void Ui::resize(int logicalW, int scale) {
     w_ = (float)logicalW; scale_ = std::max(1, scale);
@@ -121,9 +127,11 @@ void Ui::setContext(const Context &c) {
 }
 
 void Ui::reset() {
+    if (animId_) { timers_.remove(animId_); animId_ = 0; }
     for (auto &[id, t] : touches_) { timers_.remove(t.lpTimer); timers_.remove(t.repTimer); }
     touches_.clear();
-    capture_ = false; captured_.clear(); modal_ = Modal::None;
+    fade_.clear(); lit_.clear();
+    capture_ = false; captured_.clear(); modal_ = Modal::None; closing_ = false; modalT_ = 1.f;
     if (w_ > 0) redrawAll();
 }
 
@@ -366,7 +374,13 @@ void Ui::openModal(Modal m) {
     const bool was = modal_ != Modal::None;
     modal_ = m;
     closing_ = false;
-    for (auto &[id, t] : touches_) { timers_.remove(t.lpTimer); timers_.remove(t.repTimer); t.lpTimer = t.repTimer = 0; t.swipe = false; t.longOpen = false; }
+    std::vector<int> keys;
+    for (auto &[id, t] : touches_) {
+        timers_.remove(t.lpTimer); timers_.remove(t.repTimer);
+        if (t.key >= 0) keys.push_back(t.key);
+    }
+    touches_.clear();
+    for (int k : keys) redrawKey(k);
     invalidateAll();
     modalDirty_ = true;
     if (!was) {
@@ -665,8 +679,8 @@ int Ui::pickKey(float x, float y) const {
     if (base < 0 || page_ != Page::Letters || y < Layout::kStrip) return base;
     const auto &ks = lay_.keys();
     if (ks[base].letter < 0) return base;
-    std::string pre = eng_.composing();
-    for (char &c : pre) c = (char)std::tolower((unsigned char)c);
+    std::string pre;
+    for (char c : eng_.composing()) if (c != '\'') pre += (char)std::tolower((unsigned char)c);
     float pr[26];
     bool have = !pre.empty() && pre.size() < 20 && lex_.nextLetters(pre, pr);
     if (!have) return base;
@@ -674,7 +688,8 @@ int Ui::pickKey(float x, float y) const {
     for (int i = 0; i < (int)ks.size(); ++i) {
         const Key &k = ks[i];
         if (k.letter < 0) continue;
-        const float dx = (x - (k.x + k.w / 2)) / lay_.keyW(), dy = (y - (k.y + k.h / 2)) / lay_.keyH();
+        const float kx = k.x + k.padL + (k.w - k.padL - k.padR) / 2;
+        const float dx = (x - kx) / lay_.keyW(), dy = (y - (k.y + k.h / 2)) / lay_.keyH();
         const float d2 = dx * dx + dy * dy;
         if (d2 > 1.3f) continue;
         const float c = d2 - 0.22f * std::log(pr[k.letter] + 0.01f);
@@ -695,7 +710,7 @@ void Ui::startLongPress(Touch &t) {
 }
 
 void Ui::openAlts(Touch &t) {
-    if (t.swipe || t.key < 0 || t.consumed) return;
+    if (capture_ || t.swipe || t.key < 0 || t.consumed) return;
     const Key &k = lay_.keys()[t.key];
     if (k.alts.empty()) return;
     t.longOpen = true;
@@ -819,6 +834,7 @@ void Ui::release(Touch &t) {
     if (t.key < 0) {
         if (t.slot >= 0 && std::fabs(t.x - t.x0) < 20 && t.y < Layout::kStrip + 10) {
             if (t.slot == 100) { if (capture_) finishCapture(false); else if (onHide) onHide(); }
+            else if (capture_) {}
             else if (term_) {
                 const TKey &tk = kTerm[t.slot];
                 if (tk.mod) { mods_ ^= tk.mod; redrawStrip(); }
@@ -885,6 +901,13 @@ void Ui::touchCancel(int id) {
     if (t.swipe) invalidateTrail();
     if (t.key >= 0) redrawKey(t.key);
     invalidateAll();
+}
+
+void Ui::touchCancelAll() {
+    std::vector<int> ids;
+    ids.reserve(touches_.size());
+    for (const auto &kv : touches_) ids.push_back(kv.first);
+    for (int id : ids) touchCancel(id);
 }
 
 bool Ui::keyPos(const std::string &label, float &x, float &y) const {

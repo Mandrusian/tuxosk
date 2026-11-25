@@ -81,6 +81,7 @@ public:
     void touchMotion(int id, float x, float y);
     void touchUp(int id);
     void touchCancel(int id);
+    void touchCancelAll();
 
     // rendering
     PxRect takeDirty();                           // damaged region since the last call (device pixels)

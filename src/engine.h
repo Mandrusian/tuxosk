@@ -85,7 +85,7 @@ private:
     bool noPredict_ = false, autocorrectOn_ = true, autocapOn_ = true;
     bool afterSwipe_ = false;          // alternatives in the strip replace the last swiped word
     int lastSwipeBytes_ = 0;
-    struct { bool active = false; std::string typed, fixed; } lastAuto_;
+    struct { bool active = false; std::string typed, fixed; int suffixBytes = 1; } lastAuto_;
     std::chrono::steady_clock::time_point lastCommit_{}, lastSpace_{};
     bool autoSpace_ = false;           // trailing space was inserted by us (swipe / suggestion)
     int literal_ = -1;                 // index of the literal typed word in the strip, -1 none

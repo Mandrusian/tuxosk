@@ -1,6 +1,7 @@
 #include "lexicon.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -50,7 +51,8 @@ void Lexicon::loadBlocklist(const std::string &path) {
     std::ifstream in(path);
     std::string w;
     while (std::getline(in, w)) {
-        while (!w.empty() && (w.back() == '\r' || w.back() == ' ')) w.pop_back();
+        while (!w.empty() && (w.back() == '\r' || w.back() == ' ' || w.back() == '\t')) w.pop_back();
+        for (char &ch : w) ch = (char)std::tolower((unsigned char)ch);
         if (!w.empty()) block_.insert(w);
     }
 }
@@ -83,6 +85,7 @@ bool Lexicon::load(const std::string &path) {
         auto it = counts.find(k.stem);
         if (it == counts.end()) continue;
         std::string o = k.out;
+        if (block_.count(o) || block_.count(strip(o))) continue;
         words_.push_back({o, strip(o), (float)(it->second * k.mul)});
     }
     // normalise log frequency to 0..1
@@ -116,7 +119,14 @@ bool Lexicon::loadUser(const std::string &path) {
     std::ifstream in(path);
     if (!in) return false;
     std::string w;
-    while (std::getline(in, w)) if (w.size() >= 2 && !known(w) && !block_.count(w) && !block_.count(strip(w))) { user_.push_back(w); words_.push_back({w, strip(w), 0.62f}); }
+    while (std::getline(in, w)) {
+        while (!w.empty() && (w.back() == '\r' || w.back() == ' ' || w.back() == '\t')) w.pop_back();
+        for (char &ch : w) ch = (char)std::tolower((unsigned char)ch);
+        if (w.size() >= 2 && !known(w) && !block_.count(w) && !block_.count(strip(w))) {
+            user_.push_back(w);
+            words_.push_back({w, strip(w), 0.62f});
+        }
+    }
     index();
     return true;
 }
